@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 /***********************************************************
  **********************************************************
- 
+ *             vx_urlenc - Version 1.1 
+ *
+ * Author: Adam Danischewski <my first nm(dot)my last nm@gmail.com>
+ * Created: 08/21/2024 
+ * Modified: 09/03/2024 
+
  * Fast URL Encoder - Closely conforms to RFC 3986
  *
- * Takes piped in uri's similar to jq but is quicker and conforms 
- * more to RFC 3986 [diverges w/most browsers on #'s]. 
+ * Takes piped input - formats uri's similar to jq -rR '@uri' yet 
+ * quicker and conforms more to RFC 3986 [diverges w/most browsers
+ * on #'s]. 
  *
- * Handles multibyte unicode characters 
+ * Optimized (w/help thnks Claude), handles multibyte unicode characters 
  *  
  * Copyright (C) 2024 Victrixsoft
  *
- * Issues: If you find any issues please open a ticket on github!
+ * Issues: If you find any issues please open a ticket on github:
  *         https://github.com/victrixsoft/vx_urlenc/issues 
- * 
- * Author: Adam Danischewski <my first nm(dot)my last nm@gmail.com>
  * 
  **********************************************************
  ***********************************************************/
@@ -30,6 +34,8 @@
 #include <unistd.h>
 #endif
 
+#define MAX_LINE_LENGTH 8192
+#define INITIAL_BUFF_SIZE 512 // Start with a reasonable size
 #define ASCII_SIZE 128
 
 char *url_encode(const char *);
@@ -54,34 +60,35 @@ void init_lookup_table(void) {
 void __attribute__((constructor)) init() { init_lookup_table(); }
 
 char *url_encode(const char *str) {
-  if (str == NULL)
-    return NULL;
+    if (str == NULL) return NULL;
 
-  char *encoded =
-      malloc(strlen(str) * 4 * 3 + 1); // Worst case: every char 4 byte mb
-  if (encoded == NULL)
-    return NULL;
+    size_t capacity = INITIAL_BUFF_SIZE;  
+    char *encoded = malloc(capacity);
+    if (encoded == NULL) return NULL;
 
-  char *penc = encoded;
-  size_t output_idx = 0;
-  while (*str && *str != '\n') { // Stop at newline
-    if (lookup_table[(unsigned char)*str]) {
-      *penc++ = *str;
-      output_idx++;
-    } else {
-      sprintf(penc, "%%%02X", (unsigned char)*str);
-      penc += 3;
-      output_idx += 3;
+    char *penc = encoded;
+    while (*str && *str != '\n') {
+        if (penc - encoded + 4 > capacity) {  // Ensure space for worst case
+            capacity *= 2;
+            char *new_enc = realloc(encoded, capacity);
+            if (new_enc == NULL) {
+                free(encoded);
+                return NULL;
+            }
+            penc = new_enc + (penc - encoded);
+            encoded = new_enc;
+        }
+
+        if (lookup_table[(unsigned char)*str]) {
+            *penc++ = *str;
+        } else {
+            sprintf(penc, "%%%02X", (unsigned char)*str);
+            penc += 3;
+        }
+        str++;
     }
-    str++;
-  }
-  *penc = '\0';
-  char *resized_enc = realloc(encoded, output_idx + 1);
-  if (resized_enc == NULL) {
+    *penc = '\0';
     return encoded;
-  } else {
-    return resized_enc;
-  }
 }
 
 int main(int argc, char *argv[]) {
@@ -89,18 +96,18 @@ int main(int argc, char *argv[]) {
   (void)argv;
 
   if (isatty(fileno(stdin))) {
-    perror("It's not a pipe\n");
+    fprintf(stderr, ">>> Error - It's not a pipe\n");
     return 1;
   }
 
-  char strbuf[65536];
+  char strbuf[MAX_LINE_LENGTH];
   while (fgets(strbuf, sizeof strbuf, stdin) != NULL) {
     char *encoded = url_encode(strbuf);
     if (encoded) {
       printf("%s\n", encoded);
       free(encoded);
     } else {
-      fprintf(stderr, "Error encoding line\n");
+      fprintf(stderr, ">>> Error encoding line: %s\n", strbuf);
     }
   }
 
